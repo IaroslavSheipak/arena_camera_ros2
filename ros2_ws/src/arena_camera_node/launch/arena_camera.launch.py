@@ -9,12 +9,14 @@ def generate_launch_description():
             name='arena_camera',
             parameters=[
                 {
-                    'pixelformat': 'bgr8',
+                    "device_link_throughput_limit": 125000000,
+                    "gev_scpd": 0,
+                    'pixelformat': 'rgb8',
                     'width': 1440,
                     'height': 1080,
-                    'gain': 20.0,           # higher gain to brighten
+                    'gain': 30.0,           # higher gain to brighten
                     'exposure_time': 10000.0,  # 10 ms in microseconds
-                    'acquisition_frame_rate': 20.0,
+                    'acquisition_frame_rate': 25.0,
                     'trigger_mode': False,
                     'qos_history': 'keep_last',
                     'qos_history_depth': 10,

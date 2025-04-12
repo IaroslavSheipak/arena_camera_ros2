@@ -147,6 +147,7 @@ Arena Camera deriver for ROS2
       `ros2 run arena_camera_node start --ros-args -p exposure_time:=<proper value> -p trigger_mode=true`
     - To trigger an image run 
       `ros2 run arena_camera_node trigger_image`
+https://support.thinklucid.com/documentation/arena-sdk-for-linux/jumbo-frames/
 
 # Road map
 - support windows

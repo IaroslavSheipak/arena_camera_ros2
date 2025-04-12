@@ -96,10 +96,19 @@ class ArenaCameraNode : public rclcpp::Node
   // Add the missing frame rate variable and its flag:
   double acquisition_frame_rate_;
   bool is_passed_acquisition_frame_rate_;
+  int64_t device_link_throughput_limit_;
+  bool is_passed_device_link_throughput_limit_;
+
+  int64_t gev_scpd_;
+  bool is_passed_gev_scpd_;
+
+
+
 
   // -------------------------------------------------------------------------
   // Member functions
   // -------------------------------------------------------------------------
+  void set_nodes_ethernet_();
   void parse_parameters_();
   void initialize_();
 

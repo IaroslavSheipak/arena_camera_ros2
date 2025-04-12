@@ -120,6 +120,21 @@ void ArenaCameraNode::parse_parameters_()
     acquisition_frame_rate_ = this->declare_parameter("acquisition_frame_rate", -1.0);
     is_passed_acquisition_frame_rate_ = (acquisition_frame_rate_ >= 0.0);
 
+    // -----------------------------------------------------------------------
+    // Device Link Throughput Limit (Fancy Ethernet Parameter)
+    // -----------------------------------------------------------------------
+    nextParameterToDeclare = "device_link_throughput_limit";
+    device_link_throughput_limit_ =
+      this->declare_parameter<int64_t>("device_link_throughput_limit", -1);
+    is_passed_device_link_throughput_limit_ = (device_link_throughput_limit_ >= 0);
+
+    // -----------------------------------------------------------------------
+    // GevSCPD (Inter-Packet Delay)
+    // -----------------------------------------------------------------------
+    nextParameterToDeclare = "gev_scpd";
+    gev_scpd_ = this->declare_parameter<int64_t>("gev_scpd", -1);
+    is_passed_gev_scpd_ = (gev_scpd_ >= 0);
+
   } catch (rclcpp::ParameterTypeException & e) {
     log_err(nextParameterToDeclare + " argument");
     throw;
@@ -404,18 +419,23 @@ Arena::IDevice* ArenaCameraNode::create_device_ros_()
 void ArenaCameraNode::set_nodes_()
 {
   set_nodes_load_default_profile_();
+  // Configure Auto Negotiate Packet Size and Packet Resend
+  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
+  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+
+  // NEW: call set_nodes_ethernet_() to handle device link throughput limit, etc.
+  set_nodes_ethernet_();
   set_nodes_roi_();
   set_nodes_gain_();
   set_nodes_pixelformat_();
   set_nodes_exposure_();
-  set_nodes_gamma_();                   // <--- NEW function, see below
-  set_nodes_balance_white_auto_();      // <--- OPTIONAL function if you want it
+  set_nodes_gamma_();
+  set_nodes_balance_white_auto_();
   set_nodes_trigger_mode_();
-  set_nodes_acquisition_frame_rate_();  
+  set_nodes_acquisition_frame_rate_();
 
-  // Configure Auto Negotiate Packet Size and Packet Resend
-  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
-  Arena::SetNodeValue<bool>(m_pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+
+ 
 }
 
 // ---------------------------------------------------------------------------
@@ -637,4 +657,41 @@ void ArenaCameraNode::set_nodes_acquisition_frame_rate_()
   Arena::SetNodeValue<double>(nodemap, "AcquisitionFrameRate", acquisition_frame_rate_);
 
   log_info("\tAcquisitionFrameRate set to " + std::to_string(acquisition_frame_rate_));
+}
+
+// ---------------------------------------------------------------------------
+// NEW: Ethernet Packet Tuning
+// ---------------------------------------------------------------------------
+void ArenaCameraNode::set_nodes_ethernet_()
+{
+  auto device_nodemap = m_pDevice->GetNodeMap();
+
+  // DeviceLinkThroughputLimit
+  if (is_passed_device_link_throughput_limit_) {
+    try {
+      Arena::SetNodeValue<GenICam::gcstring>(device_nodemap,
+        "DeviceLinkThroughputLimitMode", "On");
+      // This is typically in bits/second. e.g., 125000000 = 1 Gbps
+      Arena::SetNodeValue<int64_t>(
+          device_nodemap,
+          "DeviceLinkThroughputLimit",
+          device_link_throughput_limit_
+      );
+      log_info("\tDeviceLinkThroughputLimit set to " +
+               std::to_string(device_link_throughput_limit_));
+    } catch (GenICam::GenericException& e) {
+      log_warn(std::string("Failed to set DeviceLinkThroughputLimit. ") + e.what());
+    }
+  }
+
+  // GevSCPD (Inter-Packet Delay)
+  if (is_passed_gev_scpd_) {
+    try {
+      // Typically in timestamp ticks, might be 1 tick = 8 ns or 1 us, depending on the camera
+      Arena::SetNodeValue<int64_t>(device_nodemap, "GevSCPD", gev_scpd_);
+      log_info("\tGevSCPD set to " + std::to_string(gev_scpd_));
+    } catch (GenICam::GenericException& e) {
+      log_warn(std::string("Failed to set GevSCPD. ") + e.what());
+    }
+  }
 }
