@@ -46,6 +46,7 @@ Arena Camera deriver for ROS2
 - install the build
 
     `. install/setup.bash`
+    `source ./install/setup.bash`
 
 # Explore
 - explore nodes

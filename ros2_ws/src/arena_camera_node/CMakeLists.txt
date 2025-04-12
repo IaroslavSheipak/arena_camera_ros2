@@ -219,6 +219,12 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+
 ament_package()
 
 #message(FATAL_ERROR ********************************************)

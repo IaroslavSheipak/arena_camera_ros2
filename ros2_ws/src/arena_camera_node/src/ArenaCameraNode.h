@@ -40,9 +40,9 @@ class ArenaCameraNode : public rclcpp::Node
   }
 
   void log_debug(std::string msg) { RCLCPP_DEBUG(this->get_logger(), msg.c_str()); };
-  void log_info(std::string msg) { RCLCPP_INFO(this->get_logger(), msg.c_str()); };
-  void log_warn(std::string msg) { RCLCPP_WARN(this->get_logger(), msg.c_str()); };
-  void log_err(std::string msg) { RCLCPP_ERROR(this->get_logger(), msg.c_str()); };
+  void log_info(std::string msg)  { RCLCPP_INFO(this->get_logger(),  msg.c_str()); };
+  void log_warn(std::string msg)  { RCLCPP_WARN(this->get_logger(),  msg.c_str()); };
+  void log_err(std::string msg)   { RCLCPP_ERROR(this->get_logger(), msg.c_str()); };
 
  private:
   std::shared_ptr<Arena::ISystem> m_pSystem;
@@ -69,6 +69,15 @@ class ArenaCameraNode : public rclcpp::Node
   double exposure_time_;
   bool is_passed_exposure_time_;
 
+  // For gamma
+  double gamma_;
+  bool is_passed_gamma_;
+
+  // For optional white balance
+  std::string balance_white_auto_;
+  bool is_passed_balance_white_auto_;
+
+
   std::string pixelformat_pfnc_;
   std::string pixelformat_ros_;
   bool is_passed_pixelformat_ros_;
@@ -84,14 +93,19 @@ class ArenaCameraNode : public rclcpp::Node
   std::string pub_qos_reliability_;
   bool is_passed_pub_qos_reliability_;
 
+  // Add the missing frame rate variable and its flag:
+  double acquisition_frame_rate_;
+  bool is_passed_acquisition_frame_rate_;
+
+  // -------------------------------------------------------------------------
+  // Member functions
+  // -------------------------------------------------------------------------
   void parse_parameters_();
   void initialize_();
 
   void wait_for_device_timer_callback_();
 
   void run_();
-  // TODO :
-  // - handle misconfigured device
   Arena::IDevice* create_device_ros_();
   void set_nodes_();
   void set_nodes_load_default_profile_();
@@ -99,13 +113,19 @@ class ArenaCameraNode : public rclcpp::Node
   void set_nodes_gain_();
   void set_nodes_pixelformat_();
   void set_nodes_exposure_();
+  void set_nodes_gamma_();                    // <--- add
+  void set_nodes_balance_white_auto_();        // <--- add if using white balance
   void set_nodes_trigger_mode_();
-  void set_nodes_test_pattern_image_();
-  void publish_images_();
+  void set_nodes_acquisition_frame_rate_(); // Called from set_nodes_()
 
+  // Optional debugging function
+  void set_nodes_test_pattern_image_();
+
+  void publish_images_();
   void publish_an_image_on_trigger_(
       std::shared_ptr<std_srvs::srv::Trigger::Request> request,
       std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+
   void msg_form_image_(Arena::IImage* pImage,
                        sensor_msgs::msg::Image& image_msg);
 };
