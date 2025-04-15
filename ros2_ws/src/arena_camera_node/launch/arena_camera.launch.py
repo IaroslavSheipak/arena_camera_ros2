@@ -14,8 +14,8 @@ def generate_launch_description():
                     'pixelformat': 'rgb8',
                     'width': 1440,
                     'height': 1080,
-                    'gain': 30.0,           # higher gain to brighten
-                    'exposure_time': 10000.0,  # 10 ms in microseconds
+                    'gain': 20.0,           # higher gain to brighten
+                    # 'exposure_time': 10000.0,  # 10 ms in microseconds
                     'acquisition_frame_rate': 25.0,
                     'trigger_mode': False,
                     'qos_history': 'keep_last',
