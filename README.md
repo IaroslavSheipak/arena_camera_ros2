@@ -7,3 +7,5 @@
 
 - launch 
     `ros2 launch arena_camera_node arena_camera.launch.py`
+
+- params are in ./src/arena_camera_node/launch/arena_camera.launch.py
