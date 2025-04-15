@@ -3,7 +3,6 @@
     `colcon build --symlink-install # build workspace for dev`
 
 - install the build
-    `. install/setup.bash`
     `source ./install/setup.bash`
 
 - launch 
