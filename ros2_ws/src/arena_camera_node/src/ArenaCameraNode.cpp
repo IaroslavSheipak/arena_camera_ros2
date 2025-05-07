@@ -646,18 +646,26 @@ void ArenaCameraNode::set_nodes_trigger_mode_()
 // ---------------------------------------------------------------------------
 void ArenaCameraNode::set_nodes_acquisition_frame_rate_()
 {
-  if (!is_passed_acquisition_frame_rate_) {
-    return; // user did not provide a valid frame rate
-  }
-
   auto nodemap = m_pDevice->GetNodeMap();
 
-  // On some cameras, you need to enable frame rate before setting the value
-  Arena::SetNodeValue<bool>(nodemap, "AcquisitionFrameRateEnable", true);
-  Arena::SetNodeValue<double>(nodemap, "AcquisitionFrameRate", acquisition_frame_rate_);
+  // ── 1.  Write only if the user asked for a specific FPS ────────────────
+  if (is_passed_acquisition_frame_rate_) {
+    // some cameras require this to be enabled before setting/reading
+    Arena::SetNodeValue<bool>(nodemap, "AcquisitionFrameRateEnable", true);
+    Arena::SetNodeValue<double>(nodemap, "AcquisitionFrameRate", acquisition_frame_rate_);
 
-  log_info("\tAcquisitionFrameRate set to " + std::to_string(acquisition_frame_rate_));
+    log_info("\tAcquisitionFrameRate set to "
+             + std::to_string(acquisition_frame_rate_));
+  }
+
+  // ── 2.  Always read back & log the value the camera is using ───────────
+  double current_fps =
+      Arena::GetNodeValue<double>(nodemap, "AcquisitionFrameRate");
+
+  log_info("\tAcquisitionFrameRate (effective) = "
+           + std::to_string(current_fps));
 }
+
 
 // ---------------------------------------------------------------------------
 // NEW: Ethernet Packet Tuning
