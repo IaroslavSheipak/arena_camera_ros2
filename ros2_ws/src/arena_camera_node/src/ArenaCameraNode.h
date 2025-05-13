@@ -1,107 +1,81 @@
 #pragma once
+/**
+ * arena_camera_node_refactored.hpp – public interface for the refactored Arena camera ROS 2 node
+ *
+ * Matches arena_camera_node_refactored.cpp (same namespace, same members).
+ * Kept minimal: only forward‑declarations & member lists needed by external units.
+ */
 
-#include <chrono>
-#include <functional>
+#include <optional>
+#include <unordered_map>
 #include <memory>
 #include <string>
+#include <cstdint>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
-#include <ArenaApi.h>
+#include "ArenaApi.h"   // Lucid Arena SDK C++ wrapper
 
-class RosImageCallback;          // forward declaration
+namespace arena_camera_node_refactored {
 
-class ArenaCameraNode : public rclcpp::Node
-{
+// ── RAII helpers (definitions in cpp) ----------------------------------------------------
+struct ArenaSystemDeleter;
+struct ArenaDeviceDeleter;
+struct ArenaImageDeleter;
+using UniqueImage = std::unique_ptr<Arena::IImage, ArenaImageDeleter>;
+
+// ── Main node class ---------------------------------------------------------------------
+class ArenaCameraNode : public rclcpp::Node {
 public:
-  ArenaCameraNode();
-  ~ArenaCameraNode();
+  explicit ArenaCameraNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
+  ~ArenaCameraNode() override = default;
 
-  // simple logging helpers
-  void log_debug(const std::string &m) { RCLCPP_DEBUG(get_logger(), "%s", m.c_str()); }
-  void log_info (const std::string &m) { RCLCPP_INFO (get_logger(), "%s", m.c_str()); }
-  void log_warn (const std::string &m) { RCLCPP_WARN (get_logger(), "%s", m.c_str()); }
-  void log_err  (const std::string &m) { RCLCPP_ERROR(get_logger(), "%s", m.c_str()); }
+private:  // ———————————————————————————————— internal types & data
+  struct Config {
+    std::optional<std::string> serial;
+    std::string pixel_fmt{"rgb8"};
+    std::optional<int64_t> width, height;
+    std::optional<double> gain, exposure, gamma, fps;
+    bool trigger{false};
+    std::unordered_map<std::string, rclcpp::Parameter> gc_override;
+  } cfg_;
 
-private:
-  // ── SDK handles ────────────────────────────────────────────────────────
-  std::shared_ptr<Arena::ISystem> m_pSystem;
-  std::shared_ptr<Arena::IDevice> m_pDevice;
+  // Arena handles (owning) ---------------------------------------------------------------
+  std::shared_ptr<Arena::ISystem> system_;
+  std::shared_ptr<Arena::IDevice> device_;
 
-  // ── ROS entities ───────────────────────────────────────────────────────
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr m_pub_;
-  rclcpp::TimerBase::SharedPtr m_wait_for_device_timer_callback_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr  m_trigger_an_image_srv_;
+  // ROS entities -------------------------------------------------------------------------
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr    srv_;
+  rclcpp::TimerBase::SharedPtr                          discovery_timer_;
 
-  // ── user‑configurable parameters (only those needed at run‑time) ───────
-  std::string serial_;
-  std::string topic_;
-  std::string pixelformat_ros_;
-  std::string pixelformat_pfnc_;
-  std::string gain_auto_;
-  std::string balance_white_auto_;
-  std::string pub_qos_history_;
-  std::string pub_qos_reliability_;
+  // other state --------------------------------------------------------------------------
+  size_t bytes_per_frame_{0};
 
-  size_t  width_  = 0;
-  size_t  height_ = 0;
-  size_t  pub_qos_history_depth_ = 0;
+  // ——— helper methods (implemented in .cpp) ——————————————————————————
+  void declare_params_();
+  void read_params_();
+  void discover_device_();
+  void configure_camera_();
+  void apply_overrides_();
+  void start_stream_();
 
-  double  gain_               = -1.0;
-  double  exposure_time_      = -1.0;
-  double  gamma_              = -1.0;
-  double  acquisition_frame_rate_ = -1.0;
-  int64_t device_link_throughput_limit_ = -1;
-  int64_t gev_scpd_                    = -1;
+  void publish_one_image_(const std::shared_ptr<std_srvs::srv::Trigger::Request>&,
+                          std::shared_ptr<std_srvs::srv::Trigger::Response>);
 
-  bool is_passed_serial_                    = false;
-  bool is_passed_pixelformat_ros_           = false;
-  bool is_passed_width                      = false;
-  bool is_passed_height                     = false;
-  bool is_passed_gain_                      = false;
-  bool is_passed_gain_auto_                 = false;
-  bool is_passed_exposure_time_             = false;
-  bool is_passed_gamma_                     = false;
-  bool is_passed_balance_white_auto_        = false;
-  bool trigger_mode_activated_              = false;
-  bool is_passed_pub_qos_history_           = false;
-  bool is_passed_pub_qos_history_depth_     = false;
-  bool is_passed_pub_qos_reliability_       = false;
-  bool is_passed_acquisition_frame_rate_    = false;
-  bool is_passed_device_link_throughput_limit_ = false;
-  bool is_passed_gev_scpd_                  = false;
+  void to_ros(Arena::IImage*, sensor_msgs::msg::Image&);
 
-  // ── helper to keep callback alive ──────────────────────────────────────
-  friend class RosImageCallback;
-  std::shared_ptr<RosImageCallback> image_callback_holder_;
-
-  // ── parameter parsing & setup ──────────────────────────────────────────
-  void parse_parameters_();
-  void initialize_();
-  void wait_for_device_timer_callback_();
-
-  // ── capture pipeline ───────────────────────────────────────────────────
-  void run_();
-  Arena::IDevice* create_device_ros_();
-  void msg_form_image_(Arena::IImage*, sensor_msgs::msg::Image &);
-
-  // ── node map helpers ───────────────────────────────────────────────────
-  void set_nodes_();
-  void set_nodes_load_default_profile_();
-  void set_nodes_ethernet_();
-  void set_nodes_roi_();
-  void set_nodes_gain_();
-  void set_nodes_pixelformat_();
-  void set_nodes_exposure_();
-  void set_nodes_gamma_();
-  void set_nodes_balance_white_auto_();
-  void set_nodes_trigger_mode_();
-  void set_nodes_acquisition_frame_rate_();
-
-  // ── trigger service ───────────────────────────────────────────────────
-  void publish_an_image_on_trigger_(
-      std::shared_ptr<std_srvs::srv::Trigger::Request>,
-      std::shared_ptr<std_srvs::srv::Trigger::Response>);
+  // image callback wrapper ---------------------------------------------------------------
+  class RosCallback : public Arena::IImageCallback {
+  public:
+    RosCallback(ArenaCameraNode* owner, std::unique_ptr<sensor_msgs::msg::Image> first);
+    void OnImage(Arena::IImage* img) override;
+  private:
+    ArenaCameraNode* owner_;
+    std::unique_ptr<sensor_msgs::msg::Image> msg_;
+  };
 };
+
+} // namespace arena_camera_node_refactored
