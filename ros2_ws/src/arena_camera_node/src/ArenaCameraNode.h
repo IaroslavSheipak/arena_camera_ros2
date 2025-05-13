@@ -66,8 +66,10 @@ class ArenaCameraNode : public rclcpp::Node
   double gain_;
   bool is_passed_gain_;
 
-  double exposure_time_;
-  bool is_passed_exposure_time_;
+  std::string gain_auto_;
+  bool is_passed_gain_auto_ = false;
+
+  double exposure_time_; bool is_passed_exposure_time_;
 
   // For gamma
   double gamma_;

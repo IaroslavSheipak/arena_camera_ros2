@@ -79,6 +79,10 @@ void ArenaCameraNode::parse_parameters_()
     balance_white_auto_ = this->declare_parameter("balance_white_auto", "");
     is_passed_balance_white_auto_ = !balance_white_auto_.empty();
 
+    nextParameterToDeclare = "gain_auto";
+    gain_auto_            = this->declare_parameter("gain_auto", "");
+    is_passed_gain_auto_  = !gain_auto_.empty();
+
     // -----------------------------------------------------------------------
     // Trigger mode
     // -----------------------------------------------------------------------
@@ -138,6 +142,26 @@ void ArenaCameraNode::parse_parameters_()
   } catch (rclcpp::ParameterTypeException & e) {
     log_err(nextParameterToDeclare + " argument");
     throw;
+  }
+}
+
+void ArenaCameraNode::set_nodes_gain_()
+{
+  auto nodemap = m_pDevice->GetNodeMap();
+
+  // 1. Automatic gain has priority over manual gain
+  if (is_passed_gain_auto_) {
+    Arena::SetNodeValue<GenICam::gcstring>(nodemap,
+                                           "GainAuto",
+                                           gain_auto_.c_str());
+    log_info("\tGainAuto set to " + gain_auto_);
+    return;                       // nothing else to do
+  }
+
+  // 2. Fallback to fixed gain if user gave one
+  if (is_passed_gain_) {
+    Arena::SetNodeValue<double>(nodemap, "Gain", gain_);
+    log_info("\tGain set to " + std::to_string(gain_));
   }
 }
 
@@ -295,36 +319,53 @@ void ArenaCameraNode::msg_form_image_(
     Arena::IImage* pImage, sensor_msgs::msg::Image& image_msg)
 {
   try {
-    // Header
-    image_msg.header.stamp.sec =
-        static_cast<uint32_t>(pImage->GetTimestampNs() / 1000000000);
+    // ---------- 1. time stamp & id ----------
+    image_msg.header.stamp.sec  =
+        static_cast<uint32_t>(pImage->GetTimestampNs() / 1'000'000'000);
     image_msg.header.stamp.nanosec =
-        static_cast<uint32_t>(pImage->GetTimestampNs() % 1000000000);
+        static_cast<uint32_t>(pImage->GetTimestampNs() % 1'000'000'000);
     image_msg.header.frame_id = std::to_string(pImage->GetFrameId());
 
-    // Height
-    image_msg.height = height_;
+    // ---------- 2. dimensions ----------
+    const uint32_t height = static_cast<uint32_t>(pImage->GetHeight());
+    const uint32_t width  = static_cast<uint32_t>(pImage->GetWidth());
+    image_msg.height = height;
+    image_msg.width  = width;
 
-    // Width
-    image_msg.width = width_;
+    // ---------- 3. format ----------
+    image_msg.encoding     = pixelformat_ros_;
+    image_msg.is_bigendian =
+        (pImage->GetPixelEndianness() ==
+         Arena::EPixelEndianness::PixelEndiannessBig);
 
-    // Encoding
-    image_msg.encoding = pixelformat_ros_;
+    // ---------- 4. bytes / row (destination) ----------
+    const size_t bpp        = pImage->GetBitsPerPixel() / 8;
+    const size_t dst_stride = width * bpp;
+    image_msg.step          = static_cast<uint32_t>(dst_stride);
 
-    // Endian
-    image_msg.is_bigendian = (
-        pImage->GetPixelEndianness() == Arena::EPixelEndianness::PixelEndiannessBig);
+    // ---------- 5. bytes / row (source) ----------
+    /* Arena’s buffer may be padded to 4/8/16-byte boundaries.
+       Derive the actual row length from the buffer size so
+       we don’t depend on a non-existent GetStride():            */
+    size_t src_stride = dst_stride;                   // safe default
+    const size_t buf_size = pImage->GetSizeFilled();  // whole image
+    if (height && buf_size >= dst_stride * height) {
+      size_t possible_stride = buf_size / height;
+      if (possible_stride >= dst_stride)
+        src_stride = possible_stride;
+    }
 
-    // Step
-    auto pixel_length_in_bytes = pImage->GetBitsPerPixel() / 8;
-    auto width_length_in_bytes = pImage->GetWidth() * pixel_length_in_bytes;
-    image_msg.step = static_cast<sensor_msgs::msg::Image::_step_type>(width_length_in_bytes);
+    // ---------- 6. copy line-by-line ----------
+    image_msg.data.resize(dst_stride * height);
 
-    // Data
-    auto image_data_length_in_bytes = width_length_in_bytes * height_;
-    image_msg.data.resize(image_data_length_in_bytes);
-    std::memcpy(&image_msg.data[0], pImage->GetData(), image_data_length_in_bytes);
+    const uint8_t* src = static_cast<const uint8_t*>(pImage->GetData());
+    uint8_t*       dst = image_msg.data.data();
 
+    for (uint32_t y = 0; y < height; ++y) {
+      std::memcpy(dst + y * dst_stride,
+                  src + y * src_stride,
+                  dst_stride);
+    }
   } catch (...) {
     log_warn("Failed to form ROS Image message. Possibly corrupted data.");
   }
@@ -435,7 +476,7 @@ void ArenaCameraNode::set_nodes_()
   set_nodes_acquisition_frame_rate_();
 
 
- 
+
 }
 
 // ---------------------------------------------------------------------------
@@ -474,17 +515,6 @@ void ArenaCameraNode::set_nodes_roi_()
            " X " + std::to_string(height_));
 }
 
-// ---------------------------------------------------------------------------
-// Gain
-// ---------------------------------------------------------------------------
-void ArenaCameraNode::set_nodes_gain_()
-{
-  if (is_passed_gain_) {
-    auto nodemap = m_pDevice->GetNodeMap();
-    Arena::SetNodeValue<double>(nodemap, "Gain", gain_);
-    log_info(std::string("\tGain set to ") + std::to_string(gain_));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Pixel Format
