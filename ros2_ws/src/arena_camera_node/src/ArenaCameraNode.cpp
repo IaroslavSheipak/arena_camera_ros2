@@ -11,6 +11,59 @@
 #include "rclcpp_adapter/pixelformat_translation.h"
 #include "rclcpp_adapter/quilty_of_service_translation.cpp"
 
+#include "ArenaCameraNode.h"
+
+#include <cstring>     // memcpy
+#include <sstream>
+#include "light_arena/deviceinfo_helper.h"
+#include "rclcpp_adapter/pixelformat_translation.h"
+
+// helper callback ------------------------------------------------------------
+class RosImageCallback : public Arena::IImageCallback
+{
+public:
+  RosImageCallback(ArenaCameraNode* owner,
+                   std::unique_ptr<sensor_msgs::msg::Image> first)
+  : owner_(owner), msg_(std::move(first)) {}
+
+  void OnImage(Arena::IImage* pImage) override
+  {
+    try {
+      // 1. container for next frame
+      auto next = std::make_unique<sensor_msgs::msg::Image>();
+      next->data.resize(owner_->width_ * owner_->height_ * 3);
+
+      // 2. fill & publish current
+      owner_->msg_form_image_(pImage, *msg_);
+      owner_->m_pub_->publish(std::move(msg_));
+
+      // 3. keep new container
+      msg_ = std::move(next);
+      // Arena re‑queues buffer automatically when we return
+    } catch (const std::exception &e) {
+      owner_->log_err(std::string("OnImage exception: ") + e.what());
+    }
+  }
+private:
+  ArenaCameraNode* owner_;
+  std::unique_ptr<sensor_msgs::msg::Image> msg_;
+};
+
+// ── ctor / dtor --------------------------------------------------------------
+ArenaCameraNode::ArenaCameraNode() : Node("arena_camera")
+{
+  setvbuf(stdout, nullptr, _IONBF, BUFSIZ);
+  log_info(std::string("Creating \"") + get_name() + "\" node");
+  parse_parameters_();
+  initialize_();
+  log_info(std::string("Created \"") + get_name() + "\" node");
+}
+ArenaCameraNode::~ArenaCameraNode()
+{
+  log_info(std::string("Destroying \"") + get_name() + "\" node");
+}
+
+
 void ArenaCameraNode::parse_parameters_()
 {
   std::string nextParameterToDeclare = "";
@@ -275,100 +328,54 @@ void ArenaCameraNode::wait_for_device_timer_callback_()
   }
 }
 
+// ── run_ --------------------------------------------------------------------
 void ArenaCameraNode::run_()
 {
-  auto device = create_device_ros_();
-  m_pDevice.reset(device);
+  m_pDevice.reset(create_device_ros_());
   set_nodes_();
+
+  auto first = std::make_unique<sensor_msgs::msg::Image>();
+  first->data.resize(width_ * height_ * 3);
+
+  auto cb = std::make_shared<RosImageCallback>(this, std::move(first));
+  m_pDevice->RegisterImageCallback(cb.get());
+  image_callback_holder_ = cb;
+
   m_pDevice->StartStream();
 
-  if (!trigger_mode_activated_) {
-    publish_images_();
-  } else {
-    // If trigger_mode_activated_ is true, we rely on the trigger service
-    // to capture and publish images. (No continuous streaming here.)
-  }
+  if (trigger_mode_activated_)
+    log_warn("\tStream idle – waiting for /trigger_image service");
 }
 
-void ArenaCameraNode::publish_images_()
+// ── msg_form_image_ ----------------------------------------------------------
+void ArenaCameraNode::msg_form_image_(Arena::IImage* pImage,
+                                      sensor_msgs::msg::Image &msg)
 {
-  Arena::IImage* pImage = nullptr;
-  while (rclcpp::ok()) {
-    try {
-      auto p_image_msg = std::make_unique<sensor_msgs::msg::Image>();
-      pImage = m_pDevice->GetImage(1000);  // 1-second timeout
-      msg_form_image_(pImage, *p_image_msg);
+  msg.header.stamp = rclcpp::Time(pImage->GetTimestampNs(), RCL_ROS_TIME);
+  msg.header.frame_id = std::to_string(pImage->GetFrameId());
 
-      m_pub_->publish(std::move(p_image_msg));
+  msg.height = static_cast<uint32_t>(pImage->GetHeight());
+  msg.width  = static_cast<uint32_t>(pImage->GetWidth());
 
-      log_info(std::string("image ") + std::to_string(pImage->GetFrameId()) +
-               " published to " + topic_);
-      m_pDevice->RequeueBuffer(pImage);
-      pImage = nullptr;
-    } catch (std::exception& e) {
-      if (pImage) {
-        m_pDevice->RequeueBuffer(pImage);
-        pImage = nullptr;
-      }
-      log_warn(std::string("Exception occurred while publishing image\n") + e.what());
-    }
-  };
-}
+  msg.encoding = pixelformat_ros_;
+  msg.is_bigendian = (pImage->GetPixelEndianness() ==
+                      Arena::EPixelEndianness::PixelEndiannessBig);
 
-void ArenaCameraNode::msg_form_image_(
-    Arena::IImage* pImage, sensor_msgs::msg::Image& image_msg)
-{
-  try {
-    // ---------- 1. time stamp & id ----------
-    image_msg.header.stamp.sec  =
-        static_cast<uint32_t>(pImage->GetTimestampNs() / 1'000'000'000);
-    image_msg.header.stamp.nanosec =
-        static_cast<uint32_t>(pImage->GetTimestampNs() % 1'000'000'000);
-    image_msg.header.frame_id = std::to_string(pImage->GetFrameId());
+  const size_t bpp = pImage->GetBitsPerPixel() / 8;
+  const size_t dst_stride = msg.width * bpp;
 
-    // ---------- 2. dimensions ----------
-    const uint32_t height = static_cast<uint32_t>(pImage->GetHeight());
-    const uint32_t width  = static_cast<uint32_t>(pImage->GetWidth());
-    image_msg.height = height;
-    image_msg.width  = width;
-
-    // ---------- 3. format ----------
-    image_msg.encoding     = pixelformat_ros_;
-    image_msg.is_bigendian =
-        (pImage->GetPixelEndianness() ==
-         Arena::EPixelEndianness::PixelEndiannessBig);
-
-    // ---------- 4. bytes / row (destination) ----------
-    const size_t bpp        = pImage->GetBitsPerPixel() / 8;
-    const size_t dst_stride = width * bpp;
-    image_msg.step          = static_cast<uint32_t>(dst_stride);
-
-    // ---------- 5. bytes / row (source) ----------
-    /* Arena’s buffer may be padded to 4/8/16-byte boundaries.
-       Derive the actual row length from the buffer size so
-       we don’t depend on a non-existent GetStride():            */
-    size_t src_stride = dst_stride;                   // safe default
-    const size_t buf_size = pImage->GetSizeFilled();  // whole image
-    if (height && buf_size >= dst_stride * height) {
-      size_t possible_stride = buf_size / height;
-      if (possible_stride >= dst_stride)
-        src_stride = possible_stride;
-    }
-
-    // ---------- 6. copy line-by-line ----------
-    image_msg.data.resize(dst_stride * height);
-
-    const uint8_t* src = static_cast<const uint8_t*>(pImage->GetData());
-    uint8_t*       dst = image_msg.data.data();
-
-    for (uint32_t y = 0; y < height; ++y) {
-      std::memcpy(dst + y * dst_stride,
-                  src + y * src_stride,
-                  dst_stride);
-    }
-  } catch (...) {
-    log_warn("Failed to form ROS Image message. Possibly corrupted data.");
+  size_t src_stride = dst_stride;
+  const size_t filled = pImage->GetSizeFilled();
+  if (msg.height && filled >= dst_stride * msg.height) {
+    const size_t maybe = filled / msg.height;
+    if (maybe >= dst_stride) src_stride = maybe;
   }
+  msg.step = static_cast<uint32_t>(dst_stride);
+
+  const uint8_t *src = static_cast<const uint8_t *>(pImage->GetData());
+  uint8_t *dst = msg.data.data();
+  for (uint32_t y = 0; y < msg.height; ++y)
+    std::memcpy(dst + y * dst_stride, src + y * src_stride, dst_stride);
 }
 
 void ArenaCameraNode::publish_an_image_on_trigger_(
