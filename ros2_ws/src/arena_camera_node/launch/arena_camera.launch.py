@@ -15,8 +15,10 @@ def generate_launch_description():
                     'width': 1440,
                     'height': 1080,
                     #'gain': 10.0,           # higher gain to brighten
-                    #"balance_white_auto": "Continuous",
-                    #"gain_auto": "Continuous",
+                    "balance_white_auto": "Continuous",
+                    "gain_auto": "Continuous",
+                    "target_brightness": 70.0,        # recommended
+                    "gamma": 0.5,  
                     # 'exposure_time': 10000.0,  # 10 ms in microseconds
                     'acquisition_frame_rate': 10.0,
                     'trigger_mode': False,

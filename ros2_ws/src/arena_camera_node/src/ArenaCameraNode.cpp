@@ -137,6 +137,14 @@ void ArenaCameraNode::parse_parameters_()
     is_passed_gain_auto_  = !gain_auto_.empty();
 
     // -----------------------------------------------------------------------
+    // Target Brightness  (Auto-Exposure)
+    // -----------------------------------------------------------------------
+    nextParameterToDeclare = "target_brightness";
+    target_brightness_ = this->declare_parameter("target_brightness", -1.0);
+    is_passed_target_brightness_ = (target_brightness_ >= 0.0);
+
+
+    // -----------------------------------------------------------------------
     // Trigger mode
     // -----------------------------------------------------------------------
     nextParameterToDeclare = "trigger_mode";
@@ -481,6 +489,7 @@ void ArenaCameraNode::set_nodes_()
   set_nodes_balance_white_auto_();
   set_nodes_trigger_mode_();
   set_nodes_acquisition_frame_rate_();
+  set_nodes_target_brightness_();
 
 
 
@@ -739,4 +748,37 @@ void ArenaCameraNode::set_nodes_ethernet_()
       log_warn(std::string("Failed to set GevSCPD. ") + e.what());
     }
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// NEW: Auto-Exposure Target Brightness (clamped to camera range)
+// ---------------------------------------------------------------------------
+void ArenaCameraNode::set_nodes_target_brightness_()
+{
+  if (!is_passed_target_brightness_)
+    return;                                // nothing to do
+
+  auto nodemap = m_pDevice->GetNodeMap();
+
+  // Ensure automatic exposure is on; otherwise the camera ignores the target
+  try {
+    Arena::SetNodeValue<GenICam::gcstring>(nodemap, "ExposureAuto", "Continuous");
+  } catch (GenICam::GenericException& e) {
+    log_warn("Failed to force ExposureAuto=Continuous: " + std::string(e.what()));
+  }
+
+  // Clamp to camera limits
+  int64_t min_tb = Arena::GetNodeMin<int64_t>(nodemap, "TargetBrightness");
+  int64_t max_tb = Arena::GetNodeMax<int64_t>(nodemap, "TargetBrightness");
+
+  int64_t requested_tb = static_cast<int64_t>(target_brightness_);
+
+  if (requested_tb <  min_tb) { log_warn("TargetBrightness clamped up to min"); requested_tb = min_tb; }
+  if (requested_tb >  max_tb) { log_warn("TargetBrightness clamped down to max"); requested_tb = max_tb; }
+
+  Arena::SetNodeValue<int64_t>(nodemap, "TargetBrightness", requested_tb);
+
+  target_brightness_ = requested_tb;   // store back actual value
+  log_info("\tTargetBrightness set to " + std::to_string(target_brightness_));
 }

@@ -55,6 +55,7 @@ private:
   double  acquisition_frame_rate_ = -1.0;
   int64_t device_link_throughput_limit_ = -1;
   int64_t gev_scpd_                    = -1;
+  double  target_brightness_   = -1.0;
 
   bool is_passed_serial_                    = false;
   bool is_passed_pixelformat_ros_           = false;
@@ -72,6 +73,7 @@ private:
   bool is_passed_acquisition_frame_rate_    = false;
   bool is_passed_device_link_throughput_limit_ = false;
   bool is_passed_gev_scpd_                  = false;
+  bool is_passed_target_brightness_         = false;
 
   // ── helper to keep callback alive ──────────────────────────────────────
   friend class RosImageCallback;
@@ -99,6 +101,7 @@ private:
   void set_nodes_balance_white_auto_();
   void set_nodes_trigger_mode_();
   void set_nodes_acquisition_frame_rate_();
+  void set_nodes_target_brightness_(); 
 
   // ── trigger service ───────────────────────────────────────────────────
   void publish_an_image_on_trigger_(
