@@ -35,7 +35,7 @@ private:
   rclcpp::TimerBase::SharedPtr m_wait_for_device_timer_callback_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr  m_trigger_an_image_srv_;
 
-  // ── user‑configurable parameters (only those needed at run‑time) ───────
+  // ── user-configurable parameters (only those needed at run-time) ───────
   std::string serial_;
   std::string topic_;
   std::string pixelformat_ros_;
@@ -49,31 +49,33 @@ private:
   size_t  height_ = 0;
   size_t  pub_qos_history_depth_ = 0;
 
-  double  gain_               = -1.0;
-  double  exposure_time_      = -1.0;
-  double  gamma_              = -1.0;
-  double  acquisition_frame_rate_ = -1.0;
+  double  gain_                    = -1.0;
+  double  exposure_time_           = -1.0;
+  double  exposure_auto_damping_   = -1.0;          // NEW
+  double  gamma_                   = -1.0;
+  double  acquisition_frame_rate_  = -1.0;
   int64_t device_link_throughput_limit_ = -1;
   int64_t gev_scpd_                    = -1;
-  double  target_brightness_   = -1.0;
+  double  target_brightness_      = -1.0;
 
-  bool is_passed_serial_                    = false;
-  bool is_passed_pixelformat_ros_           = false;
-  bool is_passed_width                      = false;
-  bool is_passed_height                     = false;
-  bool is_passed_gain_                      = false;
-  bool is_passed_gain_auto_                 = false;
-  bool is_passed_exposure_time_             = false;
-  bool is_passed_gamma_                     = false;
-  bool is_passed_balance_white_auto_        = false;
-  bool trigger_mode_activated_              = false;
-  bool is_passed_pub_qos_history_           = false;
-  bool is_passed_pub_qos_history_depth_     = false;
-  bool is_passed_pub_qos_reliability_       = false;
-  bool is_passed_acquisition_frame_rate_    = false;
+  bool is_passed_serial_                       = false;
+  bool is_passed_pixelformat_ros_              = false;
+  bool is_passed_width                         = false;
+  bool is_passed_height                        = false;
+  bool is_passed_gain_                         = false;
+  bool is_passed_gain_auto_                    = false;
+  bool is_passed_exposure_time_                = false;
+  bool is_passed_exposure_auto_damping_        = false; // NEW
+  bool is_passed_gamma_                        = false;
+  bool is_passed_balance_white_auto_           = false;
+  bool trigger_mode_activated_                 = false;
+  bool is_passed_pub_qos_history_              = false;
+  bool is_passed_pub_qos_history_depth_        = false;
+  bool is_passed_pub_qos_reliability_          = false;
+  bool is_passed_acquisition_frame_rate_       = false;
   bool is_passed_device_link_throughput_limit_ = false;
-  bool is_passed_gev_scpd_                  = false;
-  bool is_passed_target_brightness_         = false;
+  bool is_passed_gev_scpd_                     = false;
+  bool is_passed_target_brightness_            = false;
 
   // ── helper to keep callback alive ──────────────────────────────────────
   friend class RosImageCallback;
@@ -97,12 +99,12 @@ private:
   void set_nodes_gain_();
   void set_nodes_pixelformat_();
   void set_nodes_exposure_();
+  void set_nodes_exposure_auto_damping_();         // NEW
   void set_nodes_gamma_();
   void set_nodes_balance_white_auto_();
   void set_nodes_trigger_mode_();
   void set_nodes_acquisition_frame_rate_();
   void set_nodes_target_brightness_(); 
-
   // ── trigger service ───────────────────────────────────────────────────
   void publish_an_image_on_trigger_(
       std::shared_ptr<std_srvs::srv::Trigger::Request>,

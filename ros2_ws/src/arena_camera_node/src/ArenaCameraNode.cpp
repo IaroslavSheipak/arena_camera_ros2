@@ -19,35 +19,51 @@
 #include "rclcpp_adapter/pixelformat_translation.h"
 
 // helper callback ------------------------------------------------------------
-class RosImageCallback : public Arena::IImageCallback
+#include <array>
+#include <sensor_msgs/msg/image.hpp>
+#include <rclcpp/rclcpp.hpp>
+
+class RosImageCallback final : public Arena::IImageCallback
 {
 public:
-  RosImageCallback(ArenaCameraNode* owner,
-                   std::unique_ptr<sensor_msgs::msg::Image> first)
-  : owner_(owner), msg_(std::move(first)) {}
+  explicit RosImageCallback(ArenaCameraNode * owner)
+  : owner_(owner)
+  {
+    const std::size_t bytes = owner_->width_ * owner_->height_ * 3;
 
-  void OnImage(Arena::IImage* pImage) override
+    // allocate and initialise the two buffers once
+    for (auto & msg : buffers_) {
+      msg.height       = owner_->height_;
+      msg.width        = owner_->width_;
+      msg.encoding     = owner_->pixelformat_ros_;   // e.g. "rgb8"
+      msg.is_bigendian = 0;
+      msg.step         = static_cast<uint32_t>(owner_->width_ * 3);
+      msg.data.resize(bytes);                        // one-time 6 MB allocation
+    }
+  }
+
+  void OnImage(Arena::IImage * pImage) override
   {
     try {
-      // 1. container for next frame
-      auto next = std::make_unique<sensor_msgs::msg::Image>();
-      next->data.resize(owner_->width_ * owner_->height_ * 3);
+      auto & msg = buffers_[index_];                 // pick 0 or 1
 
-      // 2. fill & publish current
-      owner_->msg_form_image_(pImage, *msg_);
-      owner_->m_pub_->publish(std::move(msg_));
+      owner_->msg_form_image_(pImage, msg);          // copy/convert camera buffer
+      owner_->m_pub_->publish(msg);                  // publish by const-ref
 
-      // 3. keep new container
-      msg_ = std::move(next);
-      // Arena re‑queues buffer automatically when we return
-    } catch (const std::exception &e) {
+      index_ ^= 1;                                   // toggle for next frame
+    }
+    catch (const std::exception & e) {
       owner_->log_err(std::string("OnImage exception: ") + e.what());
     }
   }
+
 private:
-  ArenaCameraNode* owner_;
-  std::unique_ptr<sensor_msgs::msg::Image> msg_;
+  ArenaCameraNode * owner_;
+  std::array<sensor_msgs::msg::Image, 2> buffers_;
+  uint8_t index_ {0};
 };
+
+
 
 // ── ctor / dtor --------------------------------------------------------------
 ArenaCameraNode::ArenaCameraNode() : Node("arena_camera")
@@ -142,6 +158,12 @@ void ArenaCameraNode::parse_parameters_()
     nextParameterToDeclare = "target_brightness";
     target_brightness_ = this->declare_parameter("target_brightness", -1.0);
     is_passed_target_brightness_ = (target_brightness_ >= 0.0);
+    
+    
+    nextParameterToDeclare = "exposure_auto_damping";
+    exposure_auto_damping_ = declare_parameter<double>(
+    "exposure_auto_damping", 0.5);  // pick a sane default
+    is_passed_exposure_auto_damping_ = has_parameter("exposure_auto_damping");
 
 
     // -----------------------------------------------------------------------
@@ -339,52 +361,63 @@ void ArenaCameraNode::wait_for_device_timer_callback_()
 // ── run_ --------------------------------------------------------------------
 void ArenaCameraNode::run_()
 {
+  // 1. open device and apply settings
   m_pDevice.reset(create_device_ros_());
   set_nodes_();
 
-  auto first = std::make_unique<sensor_msgs::msg::Image>();
-  first->data.resize(width_ * height_ * 3);
-
-  auto cb = std::make_shared<RosImageCallback>(this, std::move(first));
+  // 3. register the image callback (no extra argument now)
+  auto cb = std::make_shared<RosImageCallback>(this);
   m_pDevice->RegisterImageCallback(cb.get());
-  image_callback_holder_ = cb;
+  image_callback_holder_ = cb;          // keep it alive
 
+  // 4. start streaming
   m_pDevice->StartStream();
 
   if (trigger_mode_activated_)
     log_warn("\tStream idle – waiting for /trigger_image service");
 }
 
-// ── msg_form_image_ ----------------------------------------------------------
-void ArenaCameraNode::msg_form_image_(Arena::IImage* pImage,
-                                      sensor_msgs::msg::Image &msg)
+
+void ArenaCameraNode::msg_form_image_(Arena::IImage * pImage,
+                                      sensor_msgs::msg::Image & msg)
 {
+  // ────────────────────────────────────
+  // 1. header – minimal per-frame work
+  // ────────────────────────────────────
   msg.header.stamp = rclcpp::Time(pImage->GetTimestampNs(), RCL_ROS_TIME);
-  msg.header.frame_id = std::to_string(pImage->GetFrameId());
 
-  msg.height = static_cast<uint32_t>(pImage->GetHeight());
-  msg.width  = static_cast<uint32_t>(pImage->GetWidth());
-
-  msg.encoding = pixelformat_ros_;
-  msg.is_bigendian = (pImage->GetPixelEndianness() ==
-                      Arena::EPixelEndianness::PixelEndiannessBig);
-
-  const size_t bpp = pImage->GetBitsPerPixel() / 8;
-  const size_t dst_stride = msg.width * bpp;
-
-  size_t src_stride = dst_stride;
-  const size_t filled = pImage->GetSizeFilled();
-  if (msg.height && filled >= dst_stride * msg.height) {
-    const size_t maybe = filled / msg.height;
-    if (maybe >= dst_stride) src_stride = maybe;
+  { // int → string with no allocation
+    char buf[24];
+    auto id = static_cast<std::uint64_t>(pImage->GetFrameId());
+    auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), id);
+    if (ec == std::errc{}) {
+      msg.header.frame_id.assign(buf, static_cast<std::size_t>(ptr - buf));
+    } else {
+      msg.header.frame_id = "0";         // fallback, should never happen
+    }
   }
-  msg.step = static_cast<uint32_t>(dst_stride);
 
-  const uint8_t *src = static_cast<const uint8_t *>(pImage->GetData());
-  uint8_t *dst = msg.data.data();
-  for (uint32_t y = 0; y < msg.height; ++y)
-    std::memcpy(dst + y * dst_stride, src + y * src_stride, dst_stride);
+  // ────────────────────────────────────
+  // 2. pixel copy – one memcpy when strides match
+  // ────────────────────────────────────
+  const std::size_t bpp        = pImage->GetBitsPerPixel() / 8; // 1 or 3
+  const std::size_t dst_stride = msg.width * bpp;
+  const std::size_t src_stride =
+      static_cast<std::size_t>(pImage->GetSizeFilled()) / msg.height;
+
+  const std::uint8_t * src = static_cast<const std::uint8_t *>(pImage->GetData());
+  std::uint8_t       * dst = msg.data.data();
+
+  if (src_stride == dst_stride) {
+    // common path: camera delivers tightly packed rows
+    std::memcpy(dst, src, dst_stride * msg.height);
+  } else {
+    // padded rows: fall back to per-row copy
+    for (std::uint32_t y = 0; y < msg.height; ++y)
+      std::memcpy(dst + y * dst_stride, src + y * src_stride, dst_stride);
+  }
 }
+
 
 void ArenaCameraNode::publish_an_image_on_trigger_(
     std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
@@ -490,8 +523,7 @@ void ArenaCameraNode::set_nodes_()
   set_nodes_trigger_mode_();
   set_nodes_acquisition_frame_rate_();
   set_nodes_target_brightness_();
-
-
+  set_nodes_exposure_auto_damping_();
 
 }
 
@@ -644,6 +676,29 @@ void ArenaCameraNode::set_nodes_gamma_()
     log_info("\tGamma disabled");
   }
 }
+
+void ArenaCameraNode::set_nodes_exposure_auto_damping_()
+{
+  if (!is_passed_exposure_auto_damping_) {
+    return;            // user didn't specify the parameter
+  }
+
+  auto nodemap = m_pDevice->GetNodeMap();
+
+  try {
+    // GenICam float nodes accept a double here
+    Arena::SetNodeValue<double>(
+        nodemap, "ExposureAutoDamping", exposure_auto_damping_);
+
+    log_info("\tExposureAutoDamping set to " +
+             std::to_string(exposure_auto_damping_));
+  } catch (GenICam::GenericException &e) {
+    log_warn("Failed to set ExposureAutoDamping to " +
+             std::to_string(exposure_auto_damping_) +
+             ". Exception: " + std::string(e.what()));
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // OPTIONAL: White Balance Auto

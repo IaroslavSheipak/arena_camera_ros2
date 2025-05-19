@@ -11,14 +11,19 @@ endif()
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 14)
+
+set(CMAKE_CXX_STANDARD 23)            # moved from 14 → 17
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # -----------------------------------------------------------------------------
-# Cross-platform optimisation flags (GCC / Clang / MSVC)
+# Cross-platform warning / optimisation flags
 # -----------------------------------------------------------------------------
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  # Avoid duplicate ')' syntax errors by keeping one well-formed list
+  # ── Warnings (all builds) ───────────────────────────────────────────────
+  add_compile_options(-Wall -Wextra -Wpedantic)
+
+  # ── Optimisation flags (Release only) ───────────────────────────────────
   add_compile_options(
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:Release>:-ffast-math>
@@ -36,7 +41,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     $<$<CONFIG:Release>:-flto>
     $<$<CONFIG:Release>:-Wl,--gc-sections>
   )
+
 elseif(MSVC)
+  # ── Warnings as errors ──────────────────────────────────────────────────
+  add_compile_options(/W4 /WX)
+
+  # ── Optimisation flags (Release) ────────────────────────────────────────
   add_compile_options($<$<CONFIG:Release>:/O2> $<$<CONFIG:Release>:/GL>)
   add_link_options($<$<CONFIG:Release>:/LTCG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
 endif()
@@ -59,7 +69,7 @@ find_package(std_srvs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(arena_sdk REQUIRED)
 
-# Optional – link OpenMP if the tool-chain provides it (helps on aarch64)
+# Optional – link OpenMP if the tool-chain provides it
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
   message(STATUS "OpenMP found – building with -fopenmp support")
