@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-
+#include <charconv>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -57,6 +57,10 @@ private:
   int64_t device_link_throughput_limit_ = -1;
   int64_t gev_scpd_                    = -1;
   double  target_brightness_      = -1.0;
+  double exposure_auto_upper_limit_         = -1.0;   // µs
+  double exposure_auto_lower_limit_         = -1.0;     // µs
+  bool   is_passed_exposure_auto_upper_     = true;
+  bool   is_passed_exposure_auto_lower_     = false;
 
   bool is_passed_serial_                       = false;
   bool is_passed_pixelformat_ros_              = false;
@@ -92,6 +96,7 @@ private:
   void msg_form_image_(Arena::IImage*, sensor_msgs::msg::Image &);
 
   // ── node map helpers ───────────────────────────────────────────────────
+  void set_nodes_exposure_auto_limits_();
   void set_nodes_();
   void set_nodes_load_default_profile_();
   void set_nodes_ethernet_();
@@ -104,7 +109,7 @@ private:
   void set_nodes_balance_white_auto_();
   void set_nodes_trigger_mode_();
   void set_nodes_acquisition_frame_rate_();
-  void set_nodes_target_brightness_(); 
+  void set_nodes_target_brightness_();
   // ── trigger service ───────────────────────────────────────────────────
   void publish_an_image_on_trigger_(
       std::shared_ptr<std_srvs::srv::Trigger::Request>,

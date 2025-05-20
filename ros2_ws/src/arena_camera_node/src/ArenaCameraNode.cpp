@@ -158,13 +158,22 @@ void ArenaCameraNode::parse_parameters_()
     nextParameterToDeclare = "target_brightness";
     target_brightness_ = this->declare_parameter("target_brightness", -1.0);
     is_passed_target_brightness_ = (target_brightness_ >= 0.0);
-    
-    
+
+
     nextParameterToDeclare = "exposure_auto_damping";
     exposure_auto_damping_ = declare_parameter<double>(
     "exposure_auto_damping", 0.5);  // pick a sane default
     is_passed_exposure_auto_damping_ = has_parameter("exposure_auto_damping");
 
+    nextParameterToDeclare = "exposure_auto_upper_limit";
+    exposure_auto_upper_limit_ =
+    this->declare_parameter<double>("exposure_auto_upper_limit", -1.0);
+    is_passed_exposure_auto_upper_ = (exposure_auto_upper_limit_ > 0.0);
+
+    nextParameterToDeclare = "exposure_auto_lower_limit";
+    exposure_auto_lower_limit_ =
+    this->declare_parameter<double>("exposure_auto_lower_limit", -1.0);
+    is_passed_exposure_auto_lower_ = (exposure_auto_lower_limit_ > 0.0);
 
     // -----------------------------------------------------------------------
     // Trigger mode
@@ -505,6 +514,45 @@ Arena::IDevice* ArenaCameraNode::create_device_ros_()
   return pDevice;
 }
 
+// -----------------------------------------------------------------------------
+// Apply user-supplied auto-exposure limits (call before AcquisitionStart)
+// -----------------------------------------------------------------------------
+void ArenaCameraNode::set_nodes_exposure_auto_limits_()
+{
+  auto nm = m_pDevice->GetNodeMap();
+
+  try
+  {
+    // make sure auto-exposure is enabled
+    Arena::SetNodeValue<GenICam::gcstring>(nm, "ExposureAuto", "Continuous");
+
+    // unlock user limit nodes   (enum, not bool!)
+    Arena::SetNodeValue<GenICam::gcstring>(nm, "ExposureAutoLimitAuto", "Off");
+
+    if (is_passed_exposure_auto_upper_)
+    {
+      Arena::SetNodeValue<double>(nm, "ExposureAutoUpperLimit",
+                                  exposure_auto_upper_limit_);
+      log_info("\tExposureAutoUpperLimit → "
+               + std::to_string(exposure_auto_upper_limit_) + " µs");
+    }
+
+    if (is_passed_exposure_auto_lower_)
+    {
+      Arena::SetNodeValue<double>(nm, "ExposureAutoLowerLimit",
+                                  exposure_auto_lower_limit_);
+      log_info("\tExposureAutoLowerLimit → "
+               + std::to_string(exposure_auto_lower_limit_) + " µs");
+    }
+  }
+  catch (const GenICam::GenericException& e)
+  {
+    log_warn(std::string("Failed to set auto-exposure limits: ") + e.what());
+  }
+}
+
+
+
 void ArenaCameraNode::set_nodes_()
 {
   set_nodes_load_default_profile_();
@@ -524,7 +572,7 @@ void ArenaCameraNode::set_nodes_()
   set_nodes_acquisition_frame_rate_();
   set_nodes_target_brightness_();
   set_nodes_exposure_auto_damping_();
-
+  set_nodes_exposure_auto_limits_();
 }
 
 // ---------------------------------------------------------------------------

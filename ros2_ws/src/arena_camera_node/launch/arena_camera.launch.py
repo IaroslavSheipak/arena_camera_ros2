@@ -10,7 +10,7 @@ def generate_launch_description():
             parameters=[{
                 # ── transport & networking ───────────────────────────────
                 "device_link_throughput_limit": 125_000_000,   # 125 MB/s
-                
+
                 # ── image format & geometry ──────────────────────────────
                 "pixelformat": "rgb8",      # or "mono8" if you switch later
                 "width":        1440,
@@ -20,13 +20,15 @@ def generate_launch_description():
                 "gain_auto":                 "Continuous",
                 "exposure_auto":             "Continuous",  # default, but set explicitly if your node supports it
                 "exposure_auto_damping":      69.0,    # %   (0–100)    -- smooth but responsive
+                "exposure_auto_upper_limit": 50000.0,   # clamp shutter to 50 ms
+                # "exposure_auto_lower_limit":  500.0,   # (optional floor, µs
 
                 "target_brightness":          70.0,   # 0–255 mid-grey target
                 "gamma":                        0.5,
                 "balance_white_auto":        "Continuous",
 
                 # ── acquisition timing ─────────────────────────────────
-                # "acquisition_frame_rate":      10.0,   # Hz
+                "acquisition_frame_rate":      10.0,   # Hz
                 "trigger_mode":               False,   # free-run
 
                 # ── ROS2 QoS settings ──────────────────────────────────
